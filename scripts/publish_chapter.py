@@ -12,24 +12,21 @@
   export QIMAO_COOKIE='Hm_lvt_...=...; qimao-token=...; author-token=...;'
 
   # 存草稿（默认）
-  python publish_chapter.py 11901525 "第3章 新章节" /path/to/content.txt
+  python publish_chapter.py 11901525 "新章节" /path/to/content.txt
 
   # 立即发布
-  python publish_chapter.py 11901525 "第3章 新章节" /path/to/content.txt --mode publish
+  python publish_chapter.py 11901525 "新章节" /path/to/content.txt --mode publish
 
   # 定时发布
-  python publish_chapter.py 11901525 "第3章 新章节" /path/to/content.txt \
+  python publish_chapter.py 11901525 "新章节" /path/to/content.txt \
       --mode timed --timed-at "2026-05-01 20:00"
 
   # 带作者说
-  python publish_chapter.py 11901525 "第3章 新章节" /path/to/content.txt \
+  python publish_chapter.py 11901525 "新章节" /path/to/content.txt \
       --mode publish --author-say "求推荐票！"
 
 依赖：
   pip install playwright && playwright install chromium
-
-作者： Hermes Agent
-日期： 2026-04-29
 ==========================================================================
 """
 
@@ -185,7 +182,7 @@ def publish_chapter(
     Args:
         book_id:        书籍 ID（从 URL 参数 id= 获取）
         book_title:     书籍名称（用于 URL 编码和日志输出）
-        chapter_name:   章节标题，如 "第3章 跃迁"
+        chapter_name:   章节标题，如 "跃迁"（只传标题，七猫自动编号）
         content_html:   正文 HTML 内容（支持 <p> 标签包裹的段落）
         cookie_str:     完整登录 Cookie 字符串
         mode:           发布模式 — "draft" | "publish" | "timed"
@@ -570,17 +567,17 @@ def main() -> None:
 使用示例:
   # 基本用法（存草稿）
   export QIMAO_COOKIE='Hm_lvt_xxx=...; qimao-token=...;'
-  python publish_chapter.py 11901525 "第3章 新章节" /tmp/chapter.txt
+  python publish_chapter.py 11901525 "新章节" /tmp/chapter.txt
 
   # 立即发布
-  python publish_chapter.py 11901525 "第3章 新章节" /tmp/chapter.txt --mode publish
+  python publish_chapter.py 11901525 "新章节" /tmp/chapter.txt --mode publish
 
   # 定时发布
-  python publish_chapter.py 11901525 "第3章 新章节" /tmp/chapter.txt \\
+  python publish_chapter.py 11901525 "新章节" /tmp/chapter.txt \\
       --mode timed --timed-at "2026-05-01 20:00"
 
   # 带作者说
-  python publish_chapter.py 11901525 "第3章 新章节" /tmp/chapter.txt \\
+  python publish_chapter.py 11901525 "新章节" /tmp/chapter.txt \
       --mode publish --author-say "求推荐，求月票！"
         """,
     )
@@ -592,7 +589,7 @@ def main() -> None:
     )
     parser.add_argument(
         "chapter_name",
-        help="章节名称，如 '第3章 新章节'（最多20字）",
+        help="章节名称，如 '新章节'（只传标题，七猫自动编号，最多20字）",
     )
     parser.add_argument(
         "content_file",
