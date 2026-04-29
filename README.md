@@ -9,12 +9,12 @@
 我需要你帮我部署七猫作者后台章节自动发布工具（qimao-publish）。请按以下步骤操作：
 
 1. 克隆仓库：https://github.com/HomeSafe2017/qimao-publish
-2. 安装依赖：pip install playwright && playwright install chromium
-3. 帮我配置 config.json：
+2. 检查环境：确认我当前有 Python 3.8+ 环境
+3. 检查依赖：确认 playwright 和 Chromium 是否已安装（`pip list | grep playwright` 和 `playwright install --dry-run chromium`），缺少再安装，已存在则跳过
+4. 帮我配置 config.json：
    - cookie：你引导我获取七猫作者后台的 Cookie（详见 README.md）
    - books：问我有哪些书要管理，帮我添加别名和书籍 ID
-4. 帮我安装这个 skill 到你的系统中
-5. 之后我说「发布第X章到《书名》」时，你自动帮我填写标题、正文并发布
+5. 帮我安装这个 skill 到你的系统中
 ```
 
 </details>
@@ -100,14 +100,14 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 lib
 cd 本项目目录
 export QIMAO_COOKIE='<从浏览器复制的完整cookie>'
 
-# 存草稿
-python scripts/publish_chapter.py 11901525 "第3章 新章节" /path/to/chapter.txt --book-title "时间流域" --mode draft
+# 存草稿（章节名只需标题，七猫自动编号）
+python scripts/publish_chapter.py 11901525 "跃迁" /path/to/chapter.txt --book-title "时间流域" --mode draft
 
 # 立即发布
-python scripts/publish_chapter.py 11901525 "第3章 新章节" /path/to/chapter.txt --book-title "时间流域" --mode publish
+python scripts/publish_chapter.py 11901525 "跃迁" /path/to/chapter.txt --book-title "时间流域" --mode publish
 
 # 定时发布
-python scripts/publish_chapter.py 11901525 "第3章 新章节" /path/to/chapter.txt --book-title "时间流域" --mode timed --timed-at "2026-05-01 20:00"
+python scripts/publish_chapter.py 11901525 "跃迁" /path/to/chapter.txt --book-title "时间流域" --mode timed --timed-at "2026-05-01 20:00"
 ```
 
 ---
@@ -190,9 +190,9 @@ cat << 'TEXT' > /tmp/chapter4.txt
 "再等五分钟。"他说。
 TEXT
 
-# 发布（此时正文已超过1000字）
+# 发布（章节名只传标题，七猫自动编号）
 export QIMAO_COOKIE='...'
-python scripts/publish_chapter.py 11901525 "第4章 跃迁" /tmp/chapter4.txt \
+python scripts/publish_chapter.py 11901525 "跃迁" /tmp/chapter4.txt \
   --book-title "时间流域" \
   --mode publish \
   --author-say "求推荐票！"
@@ -201,7 +201,7 @@ python scripts/publish_chapter.py 11901525 "第4章 跃迁" /tmp/chapter4.txt \
 ### 带作者说
 
 ```bash
-python scripts/publish_chapter.py 11901525 "第5章 信号" /tmp/chapter5.txt \
+python scripts/publish_chapter.py 11901525 "信号" /tmp/chapter5.txt \
   --book-title "时间流域" \
   --mode draft \
   --author-say "这段存稿先不发布，等我再改改。"
