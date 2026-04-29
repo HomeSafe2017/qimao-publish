@@ -1,0 +1,21 @@
+{
+  "cookie": "Hm_lvt_xxx=example_value; qimao-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example; author-token=abc123; puid=12345678",
+  "books": {
+    "你的书名": {
+      "id": "11901525",
+      "title": "你的书名",
+      "default_mode": "publish",
+      "default_author_say": "每日更新，感谢追读！"
+    },
+    "另一本书": {
+      "id": "11903000",
+      "title": "另一本书",
+      "default_mode": "draft",
+      "default_author_say": ""
+    }
+  },
+  "global_defaults": {
+    "mode": "publish",
+    "author_say": ""
+  }
+}
