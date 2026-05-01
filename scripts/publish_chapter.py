@@ -98,6 +98,68 @@ def parse_cookies(cookie_str: str) -> list[dict]:
 
 
 # ======================================================================
+# Cookie 工具函数（JWT 过期检测）
+# ======================================================================
+
+import base64
+import time
+import json as json_module
+
+
+def decode_jwt_payload(token: str) -> dict | None:
+    """解码 JWT payload（不验签），用于检查令牌过期时间。
+
+    Args:
+        token: JWT 字符串（如 eyJhbGci...）
+
+    Returns:
+        解码后的 payload 字典，解码失败返回 None
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        # base64 URL-safe 解码，补齐 padding
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload_b64)
+        return json_module.loads(decoded)
+    except (IndexError, ValueError, json_module.JSONDecodeError):
+        return None
+
+
+def extract_qimao_token(cookie_str: str) -> str | None:
+    """从 Cookie 字符串中提取 qimao-token 的值。"""
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if part.startswith("qimao-token="):
+            return part.split("=", 1)[1]
+    return None
+
+
+def is_token_expired(cookie_str: str, buffer_minutes: int = 15) -> bool:
+    """检查 qimao-token JWT 是否已过期或即将过期。
+
+    Args:
+        cookie_str: 完整 Cookie 字符串
+        buffer_minutes: 提前预警时间（分钟），默认 15 分钟前就算过期
+
+    Returns:
+        True=已过期或即将过期, False=仍然有效
+    """
+    token = extract_qimao_token(cookie_str)
+    if not token:
+        return True  # 没有 token，视为过期
+
+    payload = decode_jwt_payload(token)
+    if not payload or "exp" not in payload:
+        return True  # 无法解析，视为过期
+
+    exp_time = payload["exp"]
+    now = time.time()
+    return now >= (exp_time - buffer_minutes * 60)
+
+
+# ======================================================================
 # DOM 交互工具函数
 # ======================================================================
 
@@ -151,6 +213,7 @@ def publish_chapter(
     mode: str = "draft",
     author_say: str = "",
     timed_at: str = "",
+    config_path: str = "",  # 可选，非空时发布成功后自动更新 cookie
 ) -> bool:
     """七猫章节自动发布主函数。
 
@@ -194,7 +257,160 @@ def publish_chapter(
         True  — 操作成功（保存为草稿 或 成功发布）
         False — 操作失败（Cookie 过期、按钮未找到等）
     """
-    # ---- 日志头 ----
+    # 注入自定义函数：强制点击按钮（支持 Vue 响应式）
+    def force_click(page: Page, selector: str, text: str | None = None) -> bool:
+        """增强版点击：支持多种策略按文本/选择器点击按钮。
+        
+        策略：
+        1. 按文本精确匹配
+        2. 按文本模糊匹配（包含）
+        3. 按 CSS 选择器
+        """
+        return page.evaluate(
+            """(args) => {
+                const {text, selector} = args;
+                
+                // 策略1：精确文本匹配
+                if (text) {
+                    const all = document.querySelectorAll('button, a, span, div[role="button"]');
+                    for (const el of all) {
+                        if (el.innerText.trim() === text) {
+                            // Vue 兼容：触发 mousedown + mouseup + click
+                            el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                            el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                            el.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                            return true;
+                        }
+                    }
+                }
+                
+                // 策略2：CSS 选择器
+                if (selector) {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                        el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        el.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                        return true;
+                    }
+                }
+                
+                return false;
+            }""",
+            {"text": text, "selector": selector},
+        )
+
+    def handle_any_dialog(page: Page) -> bool:
+        """通用对话框处理：勾选所有可见对话框中的复选框，然后点击确认按钮。
+        
+        处理流程：
+        1. 等待对话框渲染
+        2. 勾选所有未勾选的复选框
+        3. 点击对话框中的主要按钮（el-button--primary 或包含确定/确认/知晓等文本的按钮）
+        4. 等待对话框关闭
+        """
+        return page.evaluate(
+            """() => {
+                // 查找所有可见对话框
+                function getVisibleDialogs() {
+                    const dialogs = document.querySelectorAll(
+                        '.el-dialog, .el-dialog__wrapper, .v-modal, .el-overlay'
+                    );
+                    const visible = [];
+                    for (const d of dialogs) {
+                        const style = window.getComputedStyle(d);
+                        if (style.display !== 'none' && style.visibility !== 'hidden') {
+                            visible.push(d);
+                        }
+                    }
+                    return visible.length > 0 ? visible : [];
+                }
+                
+                let dialogs = getVisibleDialogs();
+                if (dialogs.length === 0) return false;
+                
+                // 1. 勾选所有可见的复选框
+                const checkboxes = document.querySelectorAll(
+                    '.el-checkbox, .el-checkbox__input, input[type="checkbox"]'
+                );
+                for (const cb of checkboxes) {
+                    const input = cb.querySelector('input[type="checkbox"]') || cb;
+                    if (input && !input.checked) {
+                        // 点击复选框或其label
+                        const label = cb.closest('.el-checkbox') || cb;
+                        label.click();
+                        input.checked = true;
+                        input.dispatchEvent(new Event('change', {bubbles: true}));
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                    }
+                }
+                
+                // 2. 点击对话框中的确认按钮（多种策略）
+                // 策略A: 文本匹配
+                const confirmTexts = ['确认发布', '确认', '确定', '我知道了', '已阅读并知晓'];
+                const allBtns = document.querySelectorAll('button, a, span, div[role="button"]');
+                for (const btn of allBtns) {
+                    const t = btn.innerText.trim();
+                    for (const ct of confirmTexts) {
+                        if (t === ct || t.includes(ct)) {
+                            btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                            btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                            btn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                            return true;
+                        }
+                    }
+                }
+                
+                // 策略B: .el-button--primary
+                const primaryBtns = document.querySelectorAll('.el-button--primary');
+                for (const btn of primaryBtns) {
+                    const style = window.getComputedStyle(btn);
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                        btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                        return true;
+                    }
+                }
+                
+                // 策略C: 对话框底部的任意按钮
+                for (const d of dialogs) {
+                    const btns = d.querySelectorAll('.el-dialog__footer button, .el-dialog__footer a');
+                    for (const btn of btns) {
+                        btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                        return true;
+                    }
+                }
+                
+                return true;
+            }"""
+        )
+
+    def wait_dialog_closed(page: Page, timeout: int = 5) -> bool:
+        """等待所有对话框关闭，超时返回 False。"""
+        import time
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            closed = page.evaluate(
+                """() => {
+                    const dialogs = document.querySelectorAll(
+                        '.el-dialog, .el-dialog__wrapper, .v-modal, .el-overlay'
+                    );
+                    for (const d of dialogs) {
+                        const style = window.getComputedStyle(d);
+                        if (style.display !== 'none' && style.visibility !== 'hidden') {
+                            return false;
+                        }
+                    }
+                    return true;
+                }"""
+            )
+            if closed:
+                return True
+            page.wait_for_timeout(500)
+        return False
     print(f"[七猫发布] ⏳ 开始处理: {book_title} - {chapter_name}")
     print(f"[七猫发布] 📋 模式: {mode}")
     print(f"[七猫发布] 📏 正文长度: {len(content_html)} 字符")
@@ -210,7 +426,14 @@ def publish_chapter(
 
         # 启动 Chromium 浏览器（headless=True → 无头模式，不显示窗口）
         # headless=False 可在调试时看到浏览器操作过程
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--font-render-hinting=none",
+            ],
+        )
 
         # new_context 创建浏览器上下文（隔离的会话环境）
         # 设置 UA 和视口大小以模拟真实浏览器行为，降低被风控识别的风险
@@ -358,17 +581,17 @@ def publish_chapter(
 
             print("[七猫发布] ✅ 已点击'存为草稿'，等待保存...")
             page.wait_for_timeout(5000)
-            page.screenshot(path=f"/tmp/qimao_draft_{book_id}.png")
 
         elif mode == "publish":
             # ---- 模式：立即发布 ----
             # 流程：
             #   1. 先"存为草稿"（auto-save-chapter）
             #   2. 再点击"立即发布"（触发 regular-time-data GET 请求）
-            #   3. 如果弹出"重要提醒"对话框，点击确认
+            #   3. 使用增强对话框处理（自动勾选复选框 + 点击确认按钮）
             #   4. 在"确认发布"对话框中点击确认（触发 upload-chapter POST）
             #   5. 成功后页面自动跳转到书籍管理页（book-manage/manage）
 
+            # 使用增强对话框处理（自动勾选复选框 + 点击确认按钮）
             click_by_text(page, "存为草稿")
             print("[七猫发布] 📦 已保存草稿")
             page.wait_for_timeout(3000)
@@ -377,79 +600,32 @@ def publish_chapter(
             print("[七猫发布] 🚀 已点击'立即发布'")
             page.wait_for_timeout(3000)
 
-            # 处理"重要提醒"对话框（仅首次发布时出现）
-            # 这是七猫的内容合规声明，需要用户勾选"我已阅读并知晓"
-            handled = page.evaluate(
-                """() => {
-                    // 先尝试精确匹配"我已阅读并知晓"文本
-                    const items = document.querySelectorAll(
-                        '.el-dialog__wrapper, .el-dialog, button, a, span'
-                    );
-                    for (const el of items) {
-                        const t = el.innerText.trim();
-                        if (
-                            (t.includes('已阅读') ||
-                             t.includes('知晓') ||
-                             t.includes('阅读并')) &&
-                            el.closest('.el-dialog')
-                        ) {
-                            el.click();
-                            return true;
-                        }
-                    }
-                    // fallback：点击对话框中的任意 .el-button--primary
-                    const dialogs = document.querySelectorAll(
-                        '.el-dialog, .el-dialog__wrapper'
-                    );
-                    for (const d of dialogs) {
-                        if (d.style.display !== 'none') {
-                            const btns = d.querySelectorAll(
-                                '.el-button--primary, .qm-btn.primary, .el-button'
-                            );
-                            for (const btn of btns) {
-                                btn.click();
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                }"""
-            )
+            # 第1轮：处理所有弹出的对话框（重要提醒/确认发布等）
+            handled = handle_any_dialog(page)
             if handled:
-                print("[七猫发布] 📋 已处理'重要提醒'对话框")
-            else:
-                print("[七猫发布] ℹ️  无'重要提醒'对话框（非首次发布）")
+                print("[七猫发布] 📋 已处理对话框（第1轮）")
             page.wait_for_timeout(2000)
 
-            # 点击"确认发布"按钮（Element UI 对话框）
-            # 确认发布对话框中会展示：书名、上一章、当前章、字数、内容声明
-            if click_by_text(page, "确认发布"):
-                print("[七猫发布] ✅ 已点击'确认发布'，等待发布结果...")
-            else:
-                # fallback：直接在可见对话框中找 .el-button--primary 按钮
-                page.evaluate(
-                    """() => {
-                        const dialogs = document.querySelectorAll(
-                            '.el-dialog, .el-dialog__wrapper'
-                        );
-                        for (const d of dialogs) {
-                            if (d.style.display !== 'none') {
-                                const btns = d.querySelectorAll(
-                                    '.el-button--primary'
-                                );
-                                for (const btn of btns) {
-                                    btn.click();
-                                    return;
-                                }
-                            }
-                        }
-                    }"""
-                )
-                print(
-                    "[七猫发布] ℹ️  已尝试点击对话框中的确认按钮"
-                )
+            # 等待对话框关闭
+            if not wait_dialog_closed(page, timeout=5):
+                print("[七猫发布] 🔄 对话框仍可见，再次处理...")
+                handle_any_dialog(page)
+                page.wait_for_timeout(3000)
+                if wait_dialog_closed(page, timeout=5):
+                    print("[七猫发布] ✅ 对话框已关闭")
+                else:
+                    print("[七猫发布] ⚠️  对话框可能未完全关闭，继续...")
 
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(2000)
+
+            # 如果还有对话框（确认发布），再处理一轮
+            if not wait_dialog_closed(page, timeout=2):
+                print("[七猫发布] 📋 发现对话框仍存在，再处理...")
+                handle_any_dialog(page)
+                page.wait_for_timeout(3000)
+                wait_dialog_closed(page, timeout=8)
+
+            page.wait_for_timeout(3000)
 
         elif mode == "timed":
             # ---- 模式：定时发布 ----
@@ -527,10 +703,26 @@ def publish_chapter(
         final_url: str = page.url
         print(f"[七猫发布] 🔗 最终 URL: {final_url}")
 
-        # 保存截图用于事后排查
-        screenshot_path = f"/tmp/qimao_result_{book_id}.png"
-        page.screenshot(path=screenshot_path)
-        print(f"[七猫发布] 📸 截图保存到: {screenshot_path}")
+        # 发布成功后，自动捕获服务器返回的新 cookie，更新 config.json
+        if config_path and ("book-manage" in final_url or "manage" in final_url):
+            try:
+                # Playwright context.cookies() 返回所有 cookie（包括 Set-Cookie 更新的）
+                raw_cookies = context.cookies()
+                cookie_parts = []
+                for c in raw_cookies:
+                    # 排除 domain 不是 qimao.com 的 cookie
+                    if "qimao.com" in c.get("domain", ""):
+                        cookie_parts.append(f"{c['name']}={c['value']}")
+                if cookie_parts:
+                    new_cookie_str = "; ".join(cookie_parts)
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config_data = json_module.load(f)
+                    config_data["cookie"] = new_cookie_str
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json_module.dump(config_data, f, ensure_ascii=False, indent=2)
+                    print(f"[七猫发布] 💾 Cookie 已自动更新到 {config_path}")
+            except Exception as e:
+                print(f"[七猫发布] ⚠️  Cookie 自动更新失败: {e}")
 
         browser.close()
 
@@ -620,13 +812,17 @@ def main() -> None:
         default="",
         help="作者说的话（显示在章节末尾，最多2000字）",
     )
+    parser.add_argument(
+        "--config",
+        default="",
+        help="config.json 路径（可选，用于自动刷新 cookie）",
+    )
 
     args = parser.parse_args()
 
     # ---- 获取 Cookie ----
-    # Cookie 通过环境变量传入，而不是命令行参数
-    # 原因：避免在命令行历史或进程列表中泄露敏感信息
     cookie: str | None = os.environ.get("QIMAO_COOKIE")
+    
     if not cookie:
         print("错误：请设置环境变量 QIMAO_COOKIE")
         print()
@@ -661,6 +857,7 @@ def main() -> None:
         content_html = raw_content
 
     # ---- 执行发布 ----
+    config_path = os.path.abspath(args.config) if args.config else ""
     success: bool = publish_chapter(
         book_id=args.book_id,
         book_title=args.book_title or f"书籍{args.book_id}",
@@ -670,6 +867,7 @@ def main() -> None:
         mode=args.mode,
         author_say=args.author_say,
         timed_at=args.timed_at,
+        config_path=config_path,
     )
 
     sys.exit(0 if success else 1)
