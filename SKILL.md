@@ -69,10 +69,11 @@ tags:
 export QIMAO_COOKIE='<来自config.json的cookie>'
 python scripts/publish_chapter.py <book_id> <章节名> <正文文件路径> \
   --book-title <书名> --mode <draft|publish|timed> \
-  [--author-say "作者说"] [--timed-at "YYYY-MM-DD HH:mm"]
+  [--author-say "作者说"] [--timed-at "YYYY-MM-DD HH:mm"] [--config config.json]
 ```
 
 **重要：** 始终通过 `export QIMAO_COOKIE=...` 设置环境变量，不要在命令行参数中传 cookie。
+**`--config config.json`：** 发布成功后脚本会自动从浏览器会话捕获最新 Cookie 并写入文件，下次无需手动更新。
 
 **章节名称规则：** 只传标题本身，不携带"第X章"前缀。七猫会自动根据上一章的 `name_index` 递增编号。例如章节名应为 `跃迁` 而非 `第4章 跃迁`。
 
