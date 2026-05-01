@@ -196,6 +196,16 @@ python scripts/publish_chapter.py 11901525 "跃迁" /tmp/chapter4.txt \
   --book-title "时间流域" \
   --mode publish \
   --author-say "求推荐票！"
+
+### 自动刷新 Cookie
+
+```bash
+python scripts/publish_chapter.py 11901525 "跃迁" /tmp/chapter.txt \
+  --book-title "时间流域" \
+  --mode publish \
+  --config config.json
+```
+使用 `--config config.json` 参数，发布成功后脚本会自动从浏览器会话捕获最新的 Set-Cookie，更新到 config.json 中，无需手动重新复制。
 ```
 
 ### 带作者说
@@ -218,12 +228,15 @@ qimao-publish/
 ├── config.json              # 配置文件（cookie、书籍别名，已加入 .gitignore）
 ├── config.example.json      # 配置示例（可安全提交）
 ├── scripts/
-│   └── publish_chapter.py   # 核心发布脚本（686 行）
+│   └── publish_chapter.py   # 核心发布脚本（881 行）
 ```
 
 ---
 
 ## 常见问题
+
+### Q: Cookie 过期太频繁了，每次都要手动重新复制吗？
+**解决：** 使用 `--config config.json` 参数运行脚本，发布成功后会自动捕获新的 Set-Cookie 并写入 config.json，下次运行无需手动更新。
 
 ### Q: 报错 "Cookie 可能已过期"
 **解决：** 重新打开浏览器 → 登录七猫 → 重新复制 Cookie → 更新 `config.json` 中的 `cookie` 字段。
@@ -264,3 +277,4 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 lib
 8. **headless 模式限制**：可能被风控检测，如果失败可尝试 `headless=False`
 9. **并发限制**：同一时间不要对同一本书发布多个章节，避免版本冲突
 10. **发布截图**：每次执行后会保存截图到 `/tmp/qimao_result_{id}.png`，用于排查
+11. **自动刷新 Cookie**：使用 `--config config.json` 参数可在发布后自动更新 Cookie，减少手动操作
